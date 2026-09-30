@@ -352,3 +352,71 @@ Rode uma vez e guarde o endereço: ao compartilhar de novo, o link muda.
 - Não altere os datasets de avaliação - apenas os prompts em prompts/bug_to_user_story_v2.yml
 - Itere, itere, itere - é normal precisar de 3-5 iterações para atingir 0.8 em todas as métricas
 - Documente seu processo - a jornada de otimização é tão importante quanto o resultado final
+---
+
+# Documentação da Solução
+
+## Técnicas Aplicadas (Fase 2)
+
+O prompt v1 era uma instrução de uma linha, sem persona, sem formato e com `{bug_report}` duplicado no system e no user prompt. O v2 (`prompts/bug_to_user_story_v2.yml`) aplica:
+
+| Técnica | Por que | Como foi aplicada |
+|---|---|---|
+| **Role Prompting** | Dar contexto e tom profissional à saída | "Você é uma Product Manager sênior com mais de 10 anos de experiência..." |
+| **Few-shot Learning** (obrigatória) | Mostrar o formato exato esperado, inclusive para bugs médios e complexos | 4 exemplos de entrada/saída: simples, médio com cálculo, médio de segurança e complexo com vários problemas |
+| **Chain of Thought** | Garantir que o modelo identifique persona, benefício e fatos antes de escrever | Seção "Processo de raciocínio" com 5 passos executados internamente, sem aparecer na resposta |
+| **Skeleton of Thought** | Saída previsível e estruturada | Esqueleto fixo: "Como..., eu quero..., para que...", Critérios de Aceitação (Dado/Quando/Então) e Contexto Técnico; bugs complexos viram uma User Story por problema |
+
+Outras melhorias: regras explícitas (não inventar dados, preservar números/endpoints/códigos HTTP, usar marcadores `[entre colchetes]` quando faltar informação), tratamento de edge cases (relato vago, vários problemas, script malicioso no relato, outro idioma), separação de responsabilidades entre system prompt (regras e exemplos) e user prompt (somente o relato), e `{bug_report}` usado apenas uma vez.
+
+## Resultados Finais
+
+- Link público do dataset/experimentos: https://smith.langchain.com/public/b1086283-edb9-4c8a-a0fa-86eb40e283eb/d
+- Prompt publicado no Hub: `teste-handle-public/bug_to_user_story_v2`
+- Modelos: `gpt-4.1-mini` (respostas) e `gpt-4.1` (avaliação), ambos com `temperature=0`. Os modelos da família GPT-6 rejeitam `temperature=0`.
+- Experimento aprovado (15/15 exemplos; médias no LangSmith: clarity 0.88, correctness 0.89, f1_score 0.87, helpfulness 0.90, precision 0.91 — todas >= 0.8; o `evaluate.py` imprimiu 0.88 a 0.92 na execução do terminal, a pequena diferença vem da variação natural do LLM avaliador):
+
+![Experimento v2](docs/experimento.png)
+
+- Tracing detalhado de 3 exemplos (entrada, saída gerada, referência e as 5 notas):
+
+![Trace 1 - bug de estoque](docs/trace1.png)
+![Trace 2 - bug de desconto](docs/trace2.png)
+![Trace 3 - bug do Safari](docs/trace3.png)
+
+- Observação: o dataset também mostra uma execução anterior com notas 0.00, causada pelo erro 400 de temperatura do `gpt-6-luna`, e não pelo prompt.
+
+| Métrica | v1 (original) | v2 (otimizado, média 0.89) |
+|---|---|---|
+| Helpfulness | - | 0.90 |
+| Correctness | - | 0.90 |
+| F1-Score | - | 0.88 |
+| Clarity | - | 0.88 |
+| Precision | - | 0.92 |
+
+### v1 vs v2
+
+- **Persona:** v1 "assistente" genérico → v2 Product Manager sênior.
+- **Formato:** v1 livre → v2 estrutura fixa com critérios Dado/Quando/Então e contexto técnico.
+- **Exemplos:** v1 nenhum → v2 4 exemplos few-shot cobrindo todas as complexidades do dataset.
+- **Confiabilidade:** v1 sem regras → v2 proíbe inventar dados e define edge cases.
+- **Estrutura:** v1 repetia `{bug_report}` nos dois prompts → v2 usa system para regras e user para o relato.
+
+## Como Executar
+
+**Pré-requisitos:** Python 3.10+, conta no LangSmith (com handle público), chave da OpenAI ou do Gemini.
+
+```bash
+python -m venv venv
+source venv/bin/activate        # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env            # preencha as chaves, USERNAME_LANGSMITH_HUB, LLM_PROVIDER, LLM_MODEL e EVAL_MODEL
+```
+
+```bash
+python src/pull_prompts.py      # 1. pull do prompt v1 -> prompts/bug_to_user_story_v1.yml
+# 2. edite prompts/bug_to_user_story_v2.yml
+python src/push_prompts.py      # 3. push público do v2 para o Hub
+python src/evaluate.py          # 4. avaliação (todas as métricas devem ser >= 0.8)
+pytest tests/test_prompts.py    # testes de validação do prompt
+```
